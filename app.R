@@ -1,11 +1,15 @@
 library(shiny)
 library(DBI)
 library(RSQLite)
+library(jsonlite)
+library(dplyr)
+library(stringr)
+library(plotly)
 
 con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
 
-# Define UI for application that draws a histogram
+# UI Function
 ui <- fluidPage(
 
     # Application title
@@ -14,41 +18,101 @@ ui <- fluidPage(
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
-            selectInput('gen',
+            selectInput('poke_gen',
                         'Generation',
                         choices=poke_data$generation,
                         selected=1),
             
             uiOutput('pokemon_ui'),
             
+            p("If this is your favorite pokemon, press submit below"),
             actionButton('submit', "Submit Favorite"),
         ),
         
 
         # Show a plot of the generated distribution
         mainPanel(
-           plotOutput("distPlot")
+           textOutput('abilities'),
+           plotlyOutput('bar_comp')
         )
     )
 )
 
-# Define server logic required to draw a histogram
+#  Server Function
 server <- function(input, output) {
     observeEvent(input$submit, {
         print(input$pokemon)
         print(input$gen)
         submit_date <- as.character(Sys.time())
-        df <- data.frame(generation = input$gen, 
-                         pokemon_name = input$pokemon,
+        df <- data.frame(generation = input$poke_gen, 
+                         pokemon_name = input$pokemon_name,
                          submit_date = submit_date)
         dbWriteTable(con, 'poke_survey', df, append=T)
     })
     
     output$pokemon_ui <- renderUI({
-        choices <- poke_data[which(poke_data$generation==input$gen),'name']
-        selectInput("pokemon",
+        choices <- poke_data[which(poke_data$generation==input$poke_gen),'name']
+        selectInput("pokemon_name",
                     "Choose a Pokemon:",
                     choices = choices)
+    })
+    
+    selected_pokemon <- reactive({
+        poke_selection <- poke_data[which(poke_data$name == input$pokemon_name),]
+    })
+    
+    output$abilities <- renderText({
+        req(input$pokemon_name)
+        # print(selected_pokemon())
+        ability <- selected_pokemon()$abilities
+        ability <- strsplit(ability, ",")[[1]]
+        ability <- str_replace_all(ability, "\\[", "")
+        ability <- str_replace_all(ability, "\\]", "")
+        ability <- str_replace_all(ability, "' ", "")
+        ability <- str_replace_all(ability, "'", "")
+    })
+    
+    output$bar_comp <- renderPlotly({
+        req(input$pokemon_name)
+        df <- selected_pokemon() %>%
+            select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
+            gather("Stat", "Value") %>%
+            mutate(side = 'Pokemon')
+        df_avg <- poke_data %>%
+            select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
+            summarise_all(list(mean)) %>%
+            summarise_all(list(round)) %>%
+            gather("Stat", "Value") %>%
+            mutate(side = 'Average') %>%
+            mutate(Value = -Value)
+            
+    
+        df_full <- rbind(df,df_avg)
+        print(df)
+        # order <- as.factor(df_full$Stat)
+        
+        plot <- df_full %>% 
+            ggplot(aes(x = Stat, y = Value, group = side, fill = side)) +
+            geom_bar(stat = "identity", width = 0.75) +
+            coord_flip() +#Make horizontal instead of vertical
+            scale_x_discrete(limits = df$Stat) +
+            scale_y_continuous(breaks = seq(-300, 300, 50),
+                               labels = abs(seq(-300, 300, 50))) +
+            labs(x = "", y = "") +
+            theme(legend.position = "bottom",
+                  legend.title = element_blank(),
+                  plot.title = element_text(hjust = 0.5),
+                  panel.background = element_rect(fill =  "grey90"))
+            # scale_fill_manual(values=c("red", "blue"),
+            #                   name="",
+            #                   breaks=c("Pokemon", "Average"),
+            #                   labels=c("Pokemon", "Average"))
+        
+        ggplotly(plot)
+            # # reverse the order of items in legend
+            # # guides(fill = guide_legend(reverse = TRUE)) +
+            # # change the default colors of bars
+
     })
 }
 
