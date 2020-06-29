@@ -1,6 +1,7 @@
 library(shiny)
 library(DBI)
 library(RSQLite)
+library(shinyalert)
 library(jsonlite)
 library(dplyr)
 library(stringr)
@@ -14,6 +15,7 @@ poke_data <- dbReadTable(con, 'pokemon_data')
 ui <- navbarPage("Clerb is Crey",
      tabPanel("Selector",
   fluidPage(
+     useShinyalert(),
     tags$head(
         tags$style("
                   #abilities{
@@ -21,9 +23,12 @@ ui <- navbarPage("Clerb is Crey",
                   }")),
 
     # Application title
-    titlePanel("Pokemon Selector"),
-    div(p('Choose a Pokemon and compare their base stats against 
-      the average in the dataset'),style='width:100px:'),
+    fluidRow(
+        column(width=4,
+               titlePanel("Pokemon Selector"),
+               div(p('Choose a Pokemon and compare their base stats against 
+      the average in the dataset'),style='width:100px; display:inline'))
+    ),
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
@@ -34,15 +39,15 @@ ui <- navbarPage("Clerb is Crey",
             
             uiOutput('pokemon_ui'),
             
-            p("If this is your favorite pokemon, press submit below"),
-            actionButton('submit', "Submit Favorite"),
-            imageOutput("pokemon_image", width = "400px", height = "400px", inline = T)
+            p("If this is one of your favorite Pokemon, press submit below"),
+            div(actionButton('submit', "Submit Favorite"),
+            imageOutput("pokemon_image", inline = T), style='margin-top:-10px')
         ),
         
 
         # Show a plot of the generated distribution
         mainPanel(
-           plotlyOutput('bar_comp'),
+           div(plotlyOutput('bar_comp'),style="margin-top:-85x;"),
            div(
                h5("Abilities:", style="display:inline"),
                textOutput('abilities')
@@ -53,21 +58,48 @@ ui <- navbarPage("Clerb is Crey",
     tabPanel("Survey Display",
              fluidPage(
                  h3("Database will go here")
-             )
-     )
+            )
+     ),
+    tabPanel("Analysis",
+             fluidPage(
+                 h3("Pokemon Clustering Will go here")
+             ))
 
 )
 
 #  Server Function
-server <- function(input, output) {
+server <- function(input, output, session) {
+    
+    selected_pokemon <- reactive({
+        poke_selection <- poke_data[which(poke_data$name == input$pokemon_name),]
+    })
+    
     observeEvent(input$submit, {
-        print(input$pokemon)
-        print(input$gen)
-        submit_date <- as.character(Sys.time())
-        df <- data.frame(generation = input$poke_gen, 
-                         pokemon_name = input$pokemon_name,
-                         submit_date = submit_date)
-        dbWriteTable(con, 'poke_survey', df, append=T)
+        results <- shinyalert(
+            title = "Submit Pokemon?",
+            text = "Click Confirm to Submit",
+            closeOnEsc = TRUE, 
+            closeOnClickOutside = TRUE,
+            html = TRUE,
+            type = "warning",
+            showConfirmButton = TRUE,
+            showCancelButton = TRUE,
+            confirmButtonText = "Submit",
+            confirmButtonCol = "#539BBD",
+            cancelButtonText = "Cancel",
+            inputId = 'submission_alert',
+            callbackR = function(value) { shinyalert(paste("Congratulations! You submitted something")) }
+        )
+    })
+    
+    observeEvent(input$submission_alert, {
+        if (input$submission_alert) {
+            submit_date <- as.character(Sys.time())
+            df <- data.frame(generation = input$poke_gen, 
+                             pokemon_name = input$pokemon_name,
+                             submit_date = submit_date)
+            dbWriteTable(con, 'poke_survey', df, append=T)
+        }
     })
     
     output$pokemon_ui <- renderUI({
@@ -77,9 +109,6 @@ server <- function(input, output) {
                     choices = choices)
     })
     
-    selected_pokemon <- reactive({
-        poke_selection <- poke_data[which(poke_data$name == input$pokemon_name),]
-    })
     
     output$abilities <- renderText({
         req(input$pokemon_name)
@@ -141,14 +170,12 @@ server <- function(input, output) {
         
         ggplotly(plot, tooltip = c("text")) %>%
             layout(legend = l)
-            # # reverse the order of items in legend
-            # # guides(fill = guide_legend(reverse = TRUE)) +
-            # # change the default colors of bars
     })
     
     output$pokemon_image <- renderImage({
         req(input$pokemon_name)
-        # When input$n is 1, filename is ./images/image1.jpeg
+        # filename is ./images/`pokemon_name`.png
+        # Won't work with the .jpg images which I should fix at some point
             filename <- normalizePath(file.path('./images',
                                       paste(tolower(input$pokemon_name), '.png', sep='')))
             
