@@ -5,16 +5,21 @@ library(jsonlite)
 library(dplyr)
 library(stringr)
 library(plotly)
+library(tidyr)
 
 con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
 
 # UI Function
-ui <- fluidPage(
+ui <- fluidPage(tags$head(tags$style("
+                  #abilities{
+                  display:inline
+                  }")),
 
     # Application title
-    titlePanel("Pokemon Datset"),
-    p('This page will be where users can submit a Pokemon'),
+    titlePanel("Pokemon Selector"),
+    p('Choose a Pokemon and compare their base stats against 
+      the average in the dataset'),
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
@@ -32,8 +37,11 @@ ui <- fluidPage(
 
         # Show a plot of the generated distribution
         mainPanel(
-           textOutput('abilities'),
-           plotlyOutput('bar_comp')
+           plotlyOutput('bar_comp'),
+           div(
+               h5("Abilities:", style="display:inline"),
+               textOutput('abilities')
+           ),
         )
     )
 )
@@ -69,7 +77,9 @@ server <- function(input, output) {
         ability <- str_replace_all(ability, "\\[", "")
         ability <- str_replace_all(ability, "\\]", "")
         ability <- str_replace_all(ability, "' ", "")
-        ability <- str_replace_all(ability, "'", "")
+        ability <- paste(str_replace_all(ability, "'", ""), sep = ',')
+        
+        return(ability)
     })
     
     output$bar_comp <- renderPlotly({
@@ -88,11 +98,19 @@ server <- function(input, output) {
             
     
         df_full <- rbind(df,df_avg)
-        print(df)
-        # order <- as.factor(df_full$Stat)
+
+        l <- list(
+            font = list(
+                family = "sans-serif",
+                size = 12,
+                color = "#000"),
+            x = -.001, y = 0, orientation = 'h')
         
         plot <- df_full %>% 
-            ggplot(aes(x = Stat, y = Value, group = side, fill = side)) +
+            ggplot(aes(x = Stat, y = Value, group = side, fill = side,
+            text = paste0(ifelse(side=='Average', 'Group Average', input$pokemon_name),
+                         '<br>', Stat, ': ', abs(Value)
+                         ))) + 
             geom_bar(stat = "identity", width = 0.75) +
             coord_flip() +#Make horizontal instead of vertical
             scale_x_discrete(limits = df$Stat) +
@@ -108,7 +126,8 @@ server <- function(input, output) {
             #                   breaks=c("Pokemon", "Average"),
             #                   labels=c("Pokemon", "Average"))
         
-        ggplotly(plot)
+        ggplotly(plot, tooltip = c("text")) %>%
+            layout(legend = l)
             # # reverse the order of items in legend
             # # guides(fill = guide_legend(reverse = TRUE)) +
             # # change the default colors of bars
