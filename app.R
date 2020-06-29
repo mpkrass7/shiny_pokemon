@@ -11,15 +11,19 @@ con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
 
 # UI Function
-ui <- fluidPage(tags$head(tags$style("
+ui <- navbarPage("Clerb is Crey",
+     tabPanel("Selector",
+  fluidPage(
+    tags$head(
+        tags$style("
                   #abilities{
                   display:inline
                   }")),
 
     # Application title
     titlePanel("Pokemon Selector"),
-    p('Choose a Pokemon and compare their base stats against 
-      the average in the dataset'),
+    div(p('Choose a Pokemon and compare their base stats against 
+      the average in the dataset'),style='width:100px:'),
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
@@ -32,6 +36,7 @@ ui <- fluidPage(tags$head(tags$style("
             
             p("If this is your favorite pokemon, press submit below"),
             actionButton('submit', "Submit Favorite"),
+            imageOutput("pokemon_image", width = "400px", height = "400px", inline = T)
         ),
         
 
@@ -44,6 +49,13 @@ ui <- fluidPage(tags$head(tags$style("
            ),
         )
     )
+)),
+    tabPanel("Survey Display",
+             fluidPage(
+                 h3("Database will go here")
+             )
+     )
+
 )
 
 #  Server Function
@@ -117,22 +129,32 @@ server <- function(input, output) {
             scale_y_continuous(breaks = seq(-300, 300, 50),
                                labels = abs(seq(-300, 300, 50))) +
             labs(x = "", y = "") +
+            ggtitle(paste0("Comparison of ", input$pokemon_name, " Stats Against Average")) +
             theme(legend.position = "bottom",
                   legend.title = element_blank(),
                   plot.title = element_text(hjust = 0.5),
-                  panel.background = element_rect(fill =  "grey90"))
-            # scale_fill_manual(values=c("red", "blue"),
-            #                   name="",
-            #                   breaks=c("Pokemon", "Average"),
-            #                   labels=c("Pokemon", "Average"))
+                  panel.background = element_rect(fill =  "white")) + 
+            scale_fill_manual(values=c('#2a75bb','#ffcb05'),
+                              name="",
+                              breaks=c(input$pokemon_name, "Average"),
+                              labels=c(input$pokemon_name, "Average"))
         
         ggplotly(plot, tooltip = c("text")) %>%
             layout(legend = l)
             # # reverse the order of items in legend
             # # guides(fill = guide_legend(reverse = TRUE)) +
             # # change the default colors of bars
-
     })
+    
+    output$pokemon_image <- renderImage({
+        req(input$pokemon_name)
+        # When input$n is 1, filename is ./images/image1.jpeg
+            filename <- normalizePath(file.path('./images',
+                                      paste(tolower(input$pokemon_name), '.png', sep='')))
+            
+            # Return a list containing the filename
+            list(src = filename)
+          }, deleteFile = FALSE)
 }
 
 # Run the application 
