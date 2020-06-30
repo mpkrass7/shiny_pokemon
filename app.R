@@ -16,14 +16,18 @@ library(RSQLite)
 library(ggplot2)
 library(plotly)
 
+#Data table configuration
+dt_config <- list(pageLength=10,
+                  colunDefs = list(list(className='dt-center', targets= '_all')))
+
 con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
 dbDisconnect(con)
 
 # UI Function
 ui <- navbarPage(selected = "Selector",
-  title=div(img(src='https://seeklogo.com/images/P/pokeball-logo-DC23868CA1-seeklogo.com.png',
-                style="margin-top: -14px; padding:10px", height = 50)),
+  title=div(tags$img(src="poke_ball.png", height =50),
+                style="margin-top: -25px; padding:10px"),
   #theme = "journal",
   
   windowTitle="Clerb is Crey",
@@ -76,7 +80,20 @@ ui <- navbarPage(selected = "Selector",
 )),
     tabPanel("Survey Display",
              fluidPage(
-                 h3("Database will go here")
+                 fluidRow(
+                   column(width=6,
+                          h3('Top 10 Pokemon By Votes'),
+                          plotlyOutput('survey_by_pokemon'),
+                   ),
+                   column(width=6,
+                          h3('Count of Favorites by Generation'),
+                          plotlyOutput('survey_by_generation'),
+                   )
+                 ),
+                 fluidRow(
+                   h3("Survey Results"),
+                   DT::dataTableOutput('survey_overall')
+                 )
             )
      ),
     tabPanel("Analysis",
@@ -121,33 +138,6 @@ server <- function(input, output, session) {
     #################
     # Input results #
     #################
-    
-    #Update Survey Data
-    survey_data <- reactive({
-        input$submit
-        con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
-        poke_survey <- dbReadTable(con, 'pokemon_survey')
-        dbDisconnect(con)
-        poke_survey
-    })
-    
-    output$survey_by_pokemon <- renderDataTable({
-        survey_data %>%
-            group_by(pokemon_name) %>%
-            n()
-    })
-    
-    output$survey_by_pokemon <- renderDataTable({
-        survey_data %>%
-            group_by(pokemon_name) %>%
-            n()
-    })
-    
-    output$survey_by_generation <- renderDataTable({
-        survey_data %>%
-            group_by(generation) %>%
-            n()
-    })
     
     # List abilities
     output$abilities <- renderText({
@@ -254,6 +244,69 @@ server <- function(input, output, session) {
             dbWriteTable(con, 'poke_survey', df, append=T)
             dbDisconnect(con)
         }
+    })
+    
+    ######################
+    # Survey Display Tab #
+    ######################
+    
+    #Update Survey Data
+    survey_data <- reactive({
+      input$submit
+      con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+      poke_survey <- dbReadTable(con, 'poke_survey')
+      dbDisconnect(con)
+      poke_survey
+    })
+    
+    output$survey_overall <- DT::renderDataTable({
+      survey_data()
+    }, rownames = FALSE,
+    options = dt_config)
+    
+    output$survey_by_pokemon <- renderPlotly({
+      
+      data <- survey_data() %>%
+        group_by(pokemon_name) %>%
+        summarise(Count = n()) %>%
+        select(Count, Pokemon = pokemon_name) %>%
+        arrange(desc(Count), desc(Pokemon))
+      data <- data[1:10,]
+      print(data)
+      
+      order <- rev(unique(data$Pokemon))
+      
+      g <- ggplot(data, aes(x=Pokemon, y=Count, fill = Count,
+                            text = paste0('Pokemon:', Pokemon,
+                                          '<br>Votes: ', Count))) +
+        geom_col(color='black') + 
+        scale_x_discrete(limits = order) + 
+        coord_flip() +
+        xlab("") + ylab("") +
+        theme(legend.position = "none",
+              panel.background = element_rect(colour = 'white'),
+              plot.background = element_rect(fill =  "transparent",colour = NA))
+      
+      ggplotly(g, tooltip = c("text"))
+      
+    })
+    
+    output$survey_by_generation <- renderPlotly({
+      data <- survey_data() %>%
+        group_by(generation) %>%
+        summarise(Count= n()) %>%
+        select(Count, Generation = generation)
+      
+      g <- ggplot(data, aes(x=Generation, y=Count, fill=Count,
+                            text = paste0('Generation:', Generation,
+                                          '<br>Votes: ', Count))) +
+        geom_col(color = 'black') +
+        ylab("") +
+        theme(legend.position = "none",
+              panel.background = element_rect(colour = 'white'),
+              plot.background = element_rect(fill =  "transparent",colour = NA))
+      ggplotly(g, tooltip = c("text"))
+      
     })
 }
     
