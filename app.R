@@ -10,17 +10,27 @@ library(tidyr)
 
 con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
+dbDisconnect(con)
 
 # UI Function
-ui <- navbarPage("Clerb is Crey",
-     tabPanel("Selector",
+ui <- navbarPage(selected = "Selector",
+  title=div(img(src='https://seeklogo.com/images/P/pokeball-logo-DC23868CA1-seeklogo.com.png',
+                style="margin-top: -14px; padding:10px", height = 50)),
+  #theme = "journal",
+  
+  windowTitle="Clerb is Crey",
+ tabPanel("Selector", 
   fluidPage(
+    tags$head(
+      tags$link(rel = "icon", type = "image/png", href = "pika_logo.png")
+    ),
      useShinyalert(),
     tags$head(
         tags$style("
                   #abilities{
                   display:inline
-                  }")),
+                  }"),
+        ),
 
     # Application title
     fluidRow(
@@ -70,38 +80,7 @@ ui <- navbarPage("Clerb is Crey",
 #  Server Function
 server <- function(input, output, session) {
     
-    selected_pokemon <- reactive({
-        poke_selection <- poke_data[which(poke_data$name == input$pokemon_name),]
-    })
-    
-    observeEvent(input$submit, {
-        results <- shinyalert(
-            title = "Submit Pokemon?",
-            text = "Click Confirm to Submit",
-            closeOnEsc = TRUE, 
-            closeOnClickOutside = TRUE,
-            html = TRUE,
-            type = "warning",
-            showConfirmButton = TRUE,
-            showCancelButton = TRUE,
-            confirmButtonText = "Submit",
-            confirmButtonCol = "#539BBD",
-            cancelButtonText = "Cancel",
-            inputId = 'submission_alert',
-            callbackR = function(value) { shinyalert(paste("Congratulations! You submitted something")) }
-        )
-    })
-    
-    observeEvent(input$submission_alert, {
-        if (input$submission_alert) {
-            submit_date <- as.character(Sys.time())
-            df <- data.frame(generation = input$poke_gen, 
-                             pokemon_name = input$pokemon_name,
-                             submit_date = submit_date)
-            dbWriteTable(con, 'poke_survey', df, append=T)
-        }
-    })
-    
+    # Choose a pokemon
     output$pokemon_ui <- renderUI({
         choices <- poke_data[which(poke_data$generation==input$poke_gen),'name']
         selectInput("pokemon_name",
@@ -109,7 +88,59 @@ server <- function(input, output, session) {
                     choices = choices)
     })
     
+    # Dataset filtered for the selected pokemon
+    selected_pokemon <- reactive({
+        poke_selection <- poke_data[which(poke_data$name == input$pokemon_name),]
+    })
     
+    # Create Image
+    output$pokemon_image <- renderImage({
+        req(input$pokemon_name)
+        # filename is ./images/`pokemon_name`.png
+        # Won't work with the .jpg images which I should fix at some point
+        filename <- normalizePath(file.path('./images',
+                                            paste(tolower(input$pokemon_name), '.png', sep='')))
+        
+        # Return a list containing the filename
+        list(src = filename,
+             contentType = 'image/png'
+             ,width = 200,
+             height = 200
+             )
+    }, deleteFile = FALSE)
+    
+    #################
+    # Input results #
+    #################
+    
+    #Update Survey Data
+    survey_data <- reactive({
+        input$submit
+        con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+        poke_survey <- dbReadTable(con, 'pokemon_survey')
+        dbDisconnect(con)
+        poke_survey
+    })
+    
+    output$survey_by_pokemon <- renderDataTable({
+        survey_data %>%
+            group_by(pokemon_name) %>%
+            n()
+    })
+    
+    output$survey_by_pokemon <- renderDataTable({
+        survey_data %>%
+            group_by(pokemon_name) %>%
+            n()
+    })
+    
+    output$survey_by_generation <- renderDataTable({
+        survey_data %>%
+            group_by(generation) %>%
+            n()
+    })
+    
+    # List abilities
     output$abilities <- renderText({
         req(input$pokemon_name)
         # print(selected_pokemon())
@@ -123,23 +154,29 @@ server <- function(input, output, session) {
         return(ability)
     })
     
+    # Create Butterfly Chart
     output$bar_comp <- renderPlotly({
         req(input$pokemon_name)
+        stat_names <- c('Attack', 'Defense', 'Special Attack', 'Special Defense', 'Health Points', 'Speed')
         df <- selected_pokemon() %>%
             select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
+            `colnames<-`(stat_names) %>%
             gather("Stat", "Value") %>%
             mutate(side = 'Pokemon')
         df_avg <- poke_data %>%
             select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
             summarise_all(list(mean)) %>%
             summarise_all(list(round)) %>%
+            `colnames<-`(stat_names) %>%
             gather("Stat", "Value") %>%
             mutate(side = 'Average') %>%
             mutate(Value = -Value)
             
-    
         df_full <- rbind(df,df_avg)
-
+        print(df_full)
+        the_order <- rev(unique(df_full$Stat))
+        
+        
         l <- list(
             font = list(
                 family = "sans-serif",
@@ -154,7 +191,7 @@ server <- function(input, output, session) {
                          ))) + 
             geom_bar(stat = "identity", width = 0.75) +
             coord_flip() +#Make horizontal instead of vertical
-            scale_x_discrete(limits = df$Stat) +
+            scale_x_discrete(limits = the_order) +
             scale_y_continuous(breaks = seq(-300, 300, 50),
                                labels = abs(seq(-300, 300, 50))) +
             labs(x = "", y = "") +
@@ -172,17 +209,44 @@ server <- function(input, output, session) {
             layout(legend = l)
     })
     
-    output$pokemon_image <- renderImage({
-        req(input$pokemon_name)
-        # filename is ./images/`pokemon_name`.png
-        # Won't work with the .jpg images which I should fix at some point
-            filename <- normalizePath(file.path('./images',
-                                      paste(tolower(input$pokemon_name), '.png', sep='')))
+    # Modal Dialog
+    observeEvent(input$submit, {
+        results <- shinyalert(
+            title = "Submit Pokemon?",
+            text = sprintf("Click Confirm to submit %s as one of your favorites",input$pokemon_name),
+            closeOnEsc = TRUE, 
+            closeOnClickOutside = TRUE,
+            html = TRUE,
+            type = "warning",
+            showConfirmButton = TRUE,
+            showCancelButton = TRUE,
+            confirmButtonText = "Submit",
+            confirmButtonCol = "#539BBD",
+            cancelButtonText = "Cancel",
+            inputId = 'submission_alert',
+            callbackR = function(value) {
+              if(input$submission_alert){
+                shinyalert(title="Congratulations! You submitted something",
+                           type='success')}}
+        )
+    })
+    
+    # Write to database if confirmed
+    observeEvent(input$submission_alert, {
+        if (input$submission_alert) {
+            submit_date <- as.character(Sys.time())
+            df <- data.frame(generation = input$poke_gen, 
+                             pokemon_name = input$pokemon_name,
+                             submit_date = submit_date)
             
-            # Return a list containing the filename
-            list(src = filename)
-          }, deleteFile = FALSE)
+            #Connect to database and write Table
+            con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+            dbWriteTable(con, 'poke_survey', df, append=T)
+            dbDisconnect(con)
+        }
+    })
 }
+    
 
 # Run the application 
 shinyApp(ui = ui, server = server)
