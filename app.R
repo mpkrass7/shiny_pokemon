@@ -1,12 +1,20 @@
+# Shiny
 library(shiny)
-library(DBI)
-library(RSQLite)
 library(shinyalert)
-library(jsonlite)
+library(shinythemes)
+
+#Data Munging
 library(dplyr)
 library(stringr)
-library(plotly)
 library(tidyr)
+
+#Databases
+library(DBI)
+library(RSQLite)
+
+#Plotting
+library(ggplot2)
+library(plotly)
 
 con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
@@ -21,6 +29,7 @@ ui <- navbarPage(selected = "Selector",
   windowTitle="Clerb is Crey",
  tabPanel("Selector", 
   fluidPage(
+    theme=shinythemes::shinytheme('flatly'),
     tags$head(
       tags$link(rel = "icon", type = "image/png", href = "pika_logo.png")
     ),
@@ -44,7 +53,7 @@ ui <- navbarPage(selected = "Selector",
         sidebarPanel(
             selectInput('poke_gen',
                         'Generation',
-                        choices=poke_data$generation,
+                        choices=unique(poke_data$generation),
                         selected=1),
             
             uiOutput('pokemon_ui'),
@@ -57,7 +66,7 @@ ui <- navbarPage(selected = "Selector",
 
         # Show a plot of the generated distribution
         mainPanel(
-           div(plotlyOutput('bar_comp'),style="margin-top:-85x;"),
+           div(plotlyOutput('bar_comp'),style="background: margin-top:-85x; border-style: groove; padding-right:10px"),
            div(
                h5("Abilities:", style="display:inline"),
                textOutput('abilities')
@@ -173,7 +182,7 @@ server <- function(input, output, session) {
             mutate(Value = -Value)
             
         df_full <- rbind(df,df_avg)
-        print(df_full)
+        # print(df_full)
         the_order <- rev(unique(df_full$Stat))
         
         
@@ -199,7 +208,8 @@ server <- function(input, output, session) {
             theme(legend.position = "bottom",
                   legend.title = element_blank(),
                   plot.title = element_text(hjust = 0.5),
-                  panel.background = element_rect(fill =  "white")) + 
+                  panel.background = element_rect(colour = 'white'),
+                  plot.background = element_rect(fill =  "transparent",colour = NA)) + 
             scale_fill_manual(values=c('#2a75bb','#ffcb05'),
                               name="",
                               breaks=c(input$pokemon_name, "Average"),
