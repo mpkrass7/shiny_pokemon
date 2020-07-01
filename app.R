@@ -273,7 +273,6 @@ server <- function(input, output, session) {
         arrange(desc(Count), desc(Pokemon))
       data <- data[1:10,]
       print(data)
-      
       order <- rev(unique(data$Pokemon))
       
       g <- ggplot(data, aes(x=Pokemon, y=Count, fill = Count,
