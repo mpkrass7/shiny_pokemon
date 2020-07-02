@@ -20,7 +20,7 @@ library(plotly)
 dt_config <- list(pageLength=10,
                   colunDefs = list(list(className='dt-center', targets= '_all')))
 
-con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
 poke_data <- dbReadTable(con, 'pokemon_data')
 dbDisconnect(con)
 
@@ -30,7 +30,7 @@ ui <- navbarPage(selected = "Selector",
                 style="margin-top: -25px; padding:10px"),
   #theme = "journal",
   
-  windowTitle="Clerb is Crey",
+  windowTitle="Pokemon Web App",
  tabPanel("Selector", 
   fluidPage(
     theme=shinythemes::shinytheme('flatly'),
@@ -172,7 +172,7 @@ server <- function(input, output, session) {
             mutate(Value = -Value)
             
         df_full <- rbind(df,df_avg)
-        # print(df_full)
+        print(df_full)
         the_order <- rev(unique(df_full$Stat))
         
         
@@ -199,11 +199,8 @@ server <- function(input, output, session) {
                   legend.title = element_blank(),
                   plot.title = element_text(hjust = 0.5),
                   panel.background = element_rect(colour = 'white'),
-                  plot.background = element_rect(fill =  "transparent",colour = NA)) + 
-            scale_fill_manual(values=c('#2a75bb','#ffcb05'),
-                              name="",
-                              breaks=c(input$pokemon_name, "Average"),
-                              labels=c(input$pokemon_name, "Average"))
+                  plot.background = element_rect(fill =  "transparent",colour = NA)) +
+            scale_fill_manual(values=c('#2a75bb','#ffcb05'))
         
         ggplotly(plot, tooltip = c("text")) %>%
             layout(legend = l)
@@ -240,7 +237,7 @@ server <- function(input, output, session) {
                              submit_date = submit_date)
             
             #Connect to database and write Table
-            con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+            con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
             dbWriteTable(con, 'poke_survey', df, append=T)
             dbDisconnect(con)
         }
@@ -253,7 +250,7 @@ server <- function(input, output, session) {
     #Update Survey Data
     survey_data <- reactive({
       input$submit
-      con <- dbConnect(RSQLite::SQLite(), 'pokemon_db.db')
+      con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
       poke_survey <- dbReadTable(con, 'poke_survey')
       dbDisconnect(con)
       poke_survey
@@ -268,16 +265,16 @@ server <- function(input, output, session) {
       
       data <- survey_data() %>%
         group_by(pokemon_name) %>%
-        summarise(Count = n()) %>%
-        select(Count, Pokemon = pokemon_name) %>%
-        arrange(desc(Count), desc(Pokemon))
+        summarise(Votes = n()) %>%
+        select(Votes, Pokemon = pokemon_name) %>%
+        arrange(desc(Votes), desc(Pokemon))
       data <- data[1:10,]
-      print(data)
+      # print(data)
       order <- rev(unique(data$Pokemon))
       
-      g <- ggplot(data, aes(x=Pokemon, y=Count, fill = Count,
+      g <- ggplot(data, aes(x=Pokemon, y=Votes, fill = Votes,
                             text = paste0('Pokemon:', Pokemon,
-                                          '<br>Votes: ', Count))) +
+                                          '<br>Votes: ', Votes))) +
         geom_col(color='black') + 
         scale_x_discrete(limits = order) + 
         coord_flip() +
@@ -293,12 +290,12 @@ server <- function(input, output, session) {
     output$survey_by_generation <- renderPlotly({
       data <- survey_data() %>%
         group_by(generation) %>%
-        summarise(Count= n()) %>%
-        select(Count, Generation = generation)
+        summarise(Votes= n()) %>%
+        select(Votes, Generation = generation)
       
-      g <- ggplot(data, aes(x=Generation, y=Count, fill=Count,
+      g <- ggplot(data, aes(x=Generation, y=Votes, fill=Votes,
                             text = paste0('Generation:', Generation,
-                                          '<br>Votes: ', Count))) +
+                                          '<br>Votes: ', Votes))) +
         geom_col(color = 'black') +
         ylab("") +
         theme(legend.position = "none",
