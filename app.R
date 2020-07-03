@@ -9,7 +9,6 @@ library(tidyverse)
 
 #Databases
 library(DBI)
-# library(RSQLite)
 library(pool)
 library(DT)
 library(RMySQL)
@@ -19,39 +18,10 @@ library(ggbiplot)
 library(ggplot2)
 library(plotly)
 
+#Functions
+source('pokelytics.R')
 
 # PCA Function
-run_pca_plot <- function(poke_data){
-  poke_sample <- poke_data %>% filter(generation==1)
-  poke_pca_data <- poke_sample %>%
-    select(attack, defense, sp_attack, sp_defense, hp, speed, experience_growth, capture_rate) %>%
-    mutate(capture_rate = as.numeric(capture_rate))
-  #PCA
-  poke_pca <- prcomp(poke_pca_data, center = T, scale. = T)
-  g <- ggbiplot(poke_pca, ellipse=TRUE, obs.scale = 1, var.scale = 1, group=as.character(poke_sample$is_legendary)) %>%
-    ggplot_build()
-  pca_locs <- g$data[[2]]
-  poke_names <- str_to_lower(poke_sample$name)
-  poke_names[c(122, 29,32)] <- c('mr-mime', 'nidoran-f', 'nidoran-m')
-  pca_locs$pokemon <- poke_names
-  
-  # Plotly Images of Pokemon
-  poke_pics <- purrr::map_chr(
-    pca_locs$pokemon, ~ base64enc::dataURI(file = sprintf("images/%s.png", .x))
-  )
-  pca_locs$is_legendary <- ifelse(poke_sample$is_legendary == 1, "Legendary", "Normal")
-  fig <- plot_ly(data = pca_locs, x=~x, y=~y, 
-                 customdata = poke_pics, 
-                 type = 'scatter',
-                 mode = 'markers',
-                 color = ~is_legendary, colors = c('red', 'blue'),
-                 symbol = ~is_legendary, symbols = c('star','circle'),
-                 text = ~paste("Pokemon: ",str_to_title(pokemon))) %>%
-    htmlwidgets::onRender(readLines("js/tooltip-image.js"))
-  fig %>% layout(xaxis = list(zeroline=F, title="PC1"),
-                 yaxis = list(zeroline=F, title="PC2"),
-                 legend = list(orientation = 'h'))
-}
 
 #Data table configuration
 dt_config <- list(pageLength=10,
@@ -66,18 +36,16 @@ con <- dbConnect(
   port=3306
 )
 poke_data <- dbReadTable(con, 'pokemon_data')
-onStop(function() {
-  dbDisconnect(con)
-})
 dbDisconnect(con)
 # Types
-types <- str_to_title(unique(c(poke_data$type1, poke_data$type2))[1:18])
+types <- unique(c(poke_data$type1, poke_data$type2))[1:18]
+names(types) <- str_to_title(types)
 
 # UI Function
 ui <- navbarPage(
   tags$div(tags$style(HTML(".dropdown-menu{z-index:10000 !important;"))),
   selected = "Selector",
-  title=div(tags$img(src="poke_ball.png", height =50),
+  title=div(tags$img(src="poke_ball.png", height=50),
                 style="margin-top: -25px; padding:10px"),
   #theme = "journal",
   
@@ -158,9 +126,9 @@ ui <- navbarPage(
                fluidRow(h5("Run PCA to Compare Pokemon"),
                  splitLayout(
                     pickerInput('pca_generation', "Generation", 
-                             choices=seq(1:6), multiple=T,width=200,
+                             choices=seq(1:6), multiple=T,width='75%',
                              options = list(`actions-box` = TRUE)),
-                   pickerInput('pca_type1', 'Type', choices = types, multiple=T,width=200,
+                   pickerInput('pca_type', 'Type', choices = types, multiple=T,width='75%',
                                options = list(`actions-box` = TRUE)),
                    actionBttn('run_pca', 'Run PCA',style='jelly', color = 'success')
                  )
@@ -315,20 +283,18 @@ server <- function(input, output, session) {
             print(df)
             #Connect to database and write Table
             con <- dbConnect(
-              drv      = RMySQL::MySQL(),
-              dbname   = "mpkrass_pokeShiny",
-              host     = "johnny.heliohost.org",
-              user = "mpkrass_admin",
-              password= "mytestpassword!",
+              drv=RMySQL::MySQL(),
+              dbname="mpkrass_pokeShiny",
+              host="johnny.heliohost.org",
+              user="mpkrass_admin",
+              password="mytestpassword!",
               port=3306
             )
             
             query <- sprintf(
               "INSERT INTO poke_survey (%s) VALUES (%s, '%s', '%s')",
               paste(names(df), collapse = ", "),
-              df[[1]],
-              df[[2]],
-              df[[3]]
+              df[[1]],df[[2]],df[[3]]
             )
             # print(paste(df, collapse = "', '"))
             dbSendQuery(con,  query)
@@ -405,8 +371,23 @@ server <- function(input, output, session) {
       
     })
     
+    pca_df <- reactiveValues()
+    observeEvent(input$run_pca, {
+      poke_data$name[c(29,32,122,439, 669)] <- c('mr-mime', 'nidoran-f', 'nidoran-m', 'mime-jr', 'flabebe')
+      poke_data <- poke_data %>% filter(generation!=7)
+      poke_sample <- poke_data %>% 
+        filter(generation %in% input$pca_generation) %>% 
+        filter(type1 %in% input$pca_type | type2 %in% input$pca_type)
+      pca_df[['poke_sample']] <- poke_sample
+    })
+    
+    pca_dataset <- reactive({
+      req(input$run_pca)
+      pca_df[['poke_sample']]
+    })
+    
     output$poke_pca <- renderPlotly({
-      run_pca_plot(poke_data)
+      run_pca_plot(pca_dataset())
     })
 }
     
