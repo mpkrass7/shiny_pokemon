@@ -2,30 +2,81 @@
 library(shiny)
 library(shinyalert)
 library(shinythemes)
+library(shinyWidgets)
 
 #Data Munging
-library(dplyr)
-library(stringr)
-library(tidyr)
+library(tidyverse)
 
 #Databases
 library(DBI)
-library(RSQLite)
+# library(RSQLite)
+library(pool)
+library(DT)
+library(RMySQL)
 
 #Plotting
+library(ggbiplot)
 library(ggplot2)
 library(plotly)
+
+
+# PCA Function
+run_pca_plot <- function(poke_data){
+  poke_sample <- poke_data %>% filter(generation==1)
+  poke_pca_data <- poke_sample %>%
+    select(attack, defense, sp_attack, sp_defense, hp, speed, experience_growth, capture_rate) %>%
+    mutate(capture_rate = as.numeric(capture_rate))
+  #PCA
+  poke_pca <- prcomp(poke_pca_data, center = T, scale. = T)
+  g <- ggbiplot(poke_pca, ellipse=TRUE, obs.scale = 1, var.scale = 1, group=as.character(poke_sample$is_legendary)) %>%
+    ggplot_build()
+  pca_locs <- g$data[[2]]
+  poke_names <- str_to_lower(poke_sample$name)
+  poke_names[c(122, 29,32)] <- c('mr-mime', 'nidoran-f', 'nidoran-m')
+  pca_locs$pokemon <- poke_names
+  
+  # Plotly Images of Pokemon
+  poke_pics <- purrr::map_chr(
+    pca_locs$pokemon, ~ base64enc::dataURI(file = sprintf("images/%s.png", .x))
+  )
+  pca_locs$is_legendary <- ifelse(poke_sample$is_legendary == 1, "Legendary", "Normal")
+  fig <- plot_ly(data = pca_locs, x=~x, y=~y, 
+                 customdata = poke_pics, 
+                 type = 'scatter',
+                 mode = 'markers',
+                 color = ~is_legendary, colors = c('red', 'blue'),
+                 symbol = ~is_legendary, symbols = c('star','circle'),
+                 text = ~paste("Pokemon: ",str_to_title(pokemon))) %>%
+    htmlwidgets::onRender(readLines("js/tooltip-image.js"))
+  fig %>% layout(xaxis = list(zeroline=F, title="PC1"),
+                 yaxis = list(zeroline=F, title="PC2"),
+                 legend = list(orientation = 'h'))
+}
 
 #Data table configuration
 dt_config <- list(pageLength=10,
                   colunDefs = list(list(className='dt-center', targets= '_all')))
 
-con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
+con <- dbConnect(
+  drv      = RMySQL::MySQL(),
+  dbname   = "mpkrass_pokeShiny",
+  host     = "johnny.heliohost.org",
+  user = "mpkrass_admin",
+  password= "mytestpassword!",
+  port=3306
+)
 poke_data <- dbReadTable(con, 'pokemon_data')
+onStop(function() {
+  dbDisconnect(con)
+})
 dbDisconnect(con)
+# Types
+types <- str_to_title(unique(c(poke_data$type1, poke_data$type2))[1:18])
 
 # UI Function
-ui <- navbarPage(selected = "Selector",
+ui <- navbarPage(
+  tags$div(tags$style(HTML(".dropdown-menu{z-index:10000 !important;"))),
+  selected = "Selector",
   title=div(tags$img(src="poke_ball.png", height =50),
                 style="margin-top: -25px; padding:10px"),
   #theme = "journal",
@@ -59,8 +110,10 @@ ui <- navbarPage(selected = "Selector",
                         'Generation',
                         choices=unique(poke_data$generation),
                         selected=1),
-            
             uiOutput('pokemon_ui'),
+            checkboxInput('match_legend', 'Match Legendary Status?', value=F),
+            checkboxInput('match_type', 'Match Type?', value=F),
+            checkboxInput('match_generation', 'Match Generation?', value=F),
             
             p("If this is one of your favorite Pokemon, press submit below"),
             div(actionButton('submit', "Submit Favorite"),
@@ -71,10 +124,14 @@ ui <- navbarPage(selected = "Selector",
         # Show a plot of the generated distribution
         mainPanel(
            div(plotlyOutput('bar_comp'),style="background: margin-top:-85x; border-style: groove; padding-right:10px"),
-           div(
-               h5("Abilities:", style="display:inline"),
+           splitLayout(div(
+               h5("Abilities:"),
                textOutput('abilities')
-           ),
+               ),
+           div(
+               h5("Type:"),
+               textOutput('type')
+           ))
         )
     )
 )),
@@ -97,8 +154,18 @@ ui <- navbarPage(selected = "Selector",
             )
      ),
     tabPanel("Analysis",
-             fluidPage(
-                 h3("Pokemon Clustering Will go here")
+             fluidPage(tags$head(tags$style(HTML(".shiny-split-layout > div {overflow: visible;}"))),
+               fluidRow(h5("Run PCA to Compare Pokemon"),
+                 splitLayout(
+                    pickerInput('pca_generation', "Generation", 
+                             choices=seq(1:6), multiple=T,width=200,
+                             options = list(`actions-box` = TRUE)),
+                   pickerInput('pca_type1', 'Type', choices = types, multiple=T,width=200,
+                               options = list(`actions-box` = TRUE)),
+                   actionBttn('run_pca', 'Run PCA',style='jelly', color = 'success')
+                 )
+               ),
+                 plotlyOutput('poke_pca')
              ))
 
 )
@@ -142,7 +209,6 @@ server <- function(input, output, session) {
     # List abilities
     output$abilities <- renderText({
         req(input$pokemon_name)
-        # print(selected_pokemon())
         ability <- selected_pokemon()$abilities
         ability <- strsplit(ability, ",")[[1]]
         ability <- str_replace_all(ability, "\\[", "")
@@ -151,6 +217,11 @@ server <- function(input, output, session) {
         ability <- paste(str_replace_all(ability, "'", ""), sep = ',')
         
         return(ability)
+    })
+    
+    output$type <- renderText({
+      req(input$pokemon_name)
+      str_to_title(c(selected_pokemon()$type1, selected_pokemon()$type2))
     })
     
     # Create Butterfly Chart
@@ -162,7 +233,14 @@ server <- function(input, output, session) {
             `colnames<-`(stat_names) %>%
             gather("Stat", "Value") %>%
             mutate(side = 'Pokemon')
-        df_avg <- poke_data %>%
+        is_legend <- selected_pokemon()$is_legendary
+        is_generation <- selected_pokemon()$generation
+        is_type <- c(selected_pokemon()$type1, selected_pokemon()$type2)
+        poke_filter <- poke_data
+        if (input$match_legend){poke_filter <- filter(poke_filter, is_legendary==is_legend)}
+        if (input$match_generation){poke_filter <- filter(poke_filter, generation==is_generation)}
+        if (input$match_type){poke_filter <- filter(poke_filter, type1 %in% is_type | type2 %in% is_type)}
+        df_avg <- poke_filter %>%
             select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
             summarise_all(list(mean)) %>%
             summarise_all(list(round)) %>%
@@ -172,10 +250,9 @@ server <- function(input, output, session) {
             mutate(Value = -Value)
             
         df_full <- rbind(df,df_avg)
-        print(df_full)
+        # print(df_full)
         the_order <- rev(unique(df_full$Stat))
-        
-        
+      
         l <- list(
             font = list(
                 family = "sans-serif",
@@ -235,10 +312,26 @@ server <- function(input, output, session) {
             df <- data.frame(generation = input$poke_gen, 
                              pokemon_name = input$pokemon_name,
                              submit_date = submit_date)
-            
+            print(df)
             #Connect to database and write Table
-            con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
-            dbWriteTable(con, 'poke_survey', df, append=T)
+            con <- dbConnect(
+              drv      = RMySQL::MySQL(),
+              dbname   = "mpkrass_pokeShiny",
+              host     = "johnny.heliohost.org",
+              user = "mpkrass_admin",
+              password= "mytestpassword!",
+              port=3306
+            )
+            
+            query <- sprintf(
+              "INSERT INTO poke_survey (%s) VALUES (%s, '%s', '%s')",
+              paste(names(df), collapse = ", "),
+              df[[1]],
+              df[[2]],
+              df[[3]]
+            )
+            # print(paste(df, collapse = "', '"))
+            dbSendQuery(con,  query)
             dbDisconnect(con)
         }
     })
@@ -250,7 +343,14 @@ server <- function(input, output, session) {
     #Update Survey Data
     survey_data <- reactive({
       input$submit
-      con <- dbConnect(RSQLite::SQLite(), 'data/pokemon_db.db')
+      con <- dbConnect(
+        drv      = RMySQL::MySQL(),
+        dbname   = "mpkrass_pokeShiny",
+        host     = "johnny.heliohost.org",
+        user = "mpkrass_admin",
+        password= "mytestpassword!",
+        port=3306
+      )
       poke_survey <- dbReadTable(con, 'poke_survey')
       dbDisconnect(con)
       poke_survey
@@ -265,8 +365,8 @@ server <- function(input, output, session) {
       
       data <- survey_data() %>%
         group_by(pokemon_name) %>%
-        summarise(Votes = n()) %>%
-        select(Votes, Pokemon = pokemon_name) %>%
+        tally() %>%
+        select(Votes = n, Pokemon = pokemon_name) %>%
         arrange(desc(Votes), desc(Pokemon))
       data <- data[1:10,]
       # print(data)
@@ -290,9 +390,9 @@ server <- function(input, output, session) {
     output$survey_by_generation <- renderPlotly({
       data <- survey_data() %>%
         group_by(generation) %>%
-        summarise(Votes= n()) %>%
-        select(Votes, Generation = generation)
-      
+        tally() %>%
+        select(Generation = generation, Votes=n)
+
       g <- ggplot(data, aes(x=Generation, y=Votes, fill=Votes,
                             text = paste0('Generation:', Generation,
                                           '<br>Votes: ', Votes))) +
@@ -303,6 +403,10 @@ server <- function(input, output, session) {
               plot.background = element_rect(fill =  "transparent",colour = NA))
       ggplotly(g, tooltip = c("text"))
       
+    })
+    
+    output$poke_pca <- renderPlotly({
+      run_pca_plot(poke_data)
     })
 }
     
