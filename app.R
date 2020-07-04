@@ -3,6 +3,7 @@ library(shiny)
 library(shinyalert)
 library(shinythemes)
 library(shinyWidgets)
+library(shinyBS)
 
 #Data Munging
 library(tidyverse)
@@ -14,9 +15,12 @@ library(DT)
 library(RMySQL)
 
 #Plotting
-library(ggbiplot)
 library(ggplot2)
 library(plotly)
+
+#Analytics
+library(RANN)
+library(ggbiplot)
 
 #Functions
 source('pokelytics.R')
@@ -35,21 +39,23 @@ con <- dbConnect(
   password= "mytestpassword!",
   port=3306
 )
-poke_data <- dbReadTable(con, 'pokemon_data')
+poke_data <- dbReadTable(con, 'pokemon_data') %>% filter(generation != 7)
 dbDisconnect(con)
 # Types
 types <- unique(c(poke_data$type1, poke_data$type2))[1:18]
 names(types) <- str_to_title(types)
-
+features <- c('attack', 'defense', 'sp_attack', 'sp_defense', 'hp', 'speed', 'capture_rate')
+names(features) <- c('Attack', 'Defense', 'Special Attack', 'Special Defense', 'Health Points', 'Speed', 'Capture Rate')
+feature_df <- data.frame(feature_name=names(features), stringsAsFactors = F)
+rownames(feature_df) <- features
+# feature_df[c('attack','defense'), 'feature_name']
 # UI Function
 ui <- navbarPage(
   tags$div(tags$style(HTML(".dropdown-menu{z-index:10000 !important;"))),
-  selected = "Selector",
   title=div(tags$img(src="poke_ball.png", height=50),
                 style="margin-top: -25px; padding:10px"),
-  #theme = "journal",
-  
   windowTitle="Pokemon Web App",
+  selected = "Selector",
  tabPanel("Selector", 
   fluidPage(
     theme=shinythemes::shinytheme('flatly'),
@@ -79,6 +85,7 @@ ui <- navbarPage(
                         choices=unique(poke_data$generation),
                         selected=1),
             uiOutput('pokemon_ui'),
+            p('Use the checkboxes to change the average pokemon comparison on the right'),
             checkboxInput('match_legend', 'Match Legendary Status?', value=F),
             checkboxInput('match_type', 'Match Type?', value=F),
             checkboxInput('match_generation', 'Match Generation?', value=F),
@@ -87,7 +94,6 @@ ui <- navbarPage(
             div(actionButton('submit', "Submit Favorite"),
             imageOutput("pokemon_image", inline = T), style='margin-top:-10px')
         ),
-        
 
         # Show a plot of the generated distribution
         mainPanel(
@@ -123,17 +129,53 @@ ui <- navbarPage(
      ),
     tabPanel("Analysis",
              fluidPage(tags$head(tags$style(HTML(".shiny-split-layout > div {overflow: visible;}"))),
-               fluidRow(h5("Run PCA to Compare Pokemon"),
-                 splitLayout(
+               fluidRow(h3("Run PCA to Compare Pokemon"),
+                 splitLayout(cellWidths = c(rep(300,3), 250),
                     pickerInput('pca_generation', "Generation", 
-                             choices=seq(1:6), multiple=T,width='75%',
+                             choices=seq(1:6), selected=seq(1:6), 
+                             multiple=T,width='100%',
                              options = list(`actions-box` = TRUE)),
-                   pickerInput('pca_type', 'Type', choices = types, multiple=T,width='75%',
-                               options = list(`actions-box` = TRUE)),
-                   actionBttn('run_pca', 'Run PCA',style='jelly', color = 'success')
-                 )
-               ),
+                   div(pickerInput('pca_type', 'Type',
+                               choices = types, selected=types,
+                               multiple=T,width='100%',
+                               options = list(`actions-box` = TRUE)), style='width: 250px; margin-left: 100px;'),
+                   div(actionBttn('run_pca', 'Run PCA', style='jelly', color = 'success'), style='margin-left: 150px;'),
+                   div(bsButton("q1", label = "", icon = icon("question"),
+                            style = "info")),
+                   bsPopover(id = "q1", title = "PCA", trigger='click',
+                             content = paste0("PCA is a feature reduction method that takes linear combinations of variables to create fewer orthogonal features that capture as much of the variance as possible. See a ",
+                                              a("PCA explanation here",  
+                                                href = "https://builtin.com/data-science/step-step-explanation-principal-component-analysis",
+                                                target="_blank")))
+                 ),
+                 #is a feature reduction method that takes 
+                 #linear combinations of variables to create fewer orthogonal features
+                 #that capture as much of the variance as possible
+                
+                 
                  plotlyOutput('poke_pca')
+               ),
+               fluidRow(h3("Find The Most Similar Pokemon by Euclidian Distance"),
+                 splitLayout(cellWidths = c(rep(350,3), 250),
+                    uiOutput('pokemon_nn_ui', width='100%'),
+                    div(pickerInput('nn_features', '', 
+                                choices = features, selected = features, 
+                                multiple=T,width='100%',inline=F,
+                                options = list(`action-box` = TRUE)), style='margin-top:20px;'),
+                    div(actionBttn('run_nn', 'Find Closest Pokemon', style='jelly', color = 'success'),
+                        style= 'margin-top:20px; margin-left: 50px'),
+                    div(bsButton("q2", label = "", icon = icon("question"),
+                                 style = "info"), style=' margin-top:20px;'),
+                    bsPopover(id = "q2", title = "Nearest Neighbors", trigger='click',
+                              content = paste0("Limiting by the first two Principal Componenets, the pokemon closest to each other in the scatter plot may not be the most similar. Instead we can use the",
+                                               a("Euclidian Distance of the selected features.",  
+                                                 href = "https://en.wikipedia.org/wiki/Euclidean_distance#:~:text=In%20mathematics%2C%20the%20Euclidean%20distance,metric%20as%20the%20Pythagorean%20metric.",
+                                                 target="_blank")))
+                    # div()
+                    ),
+                 DT::dataTableOutput('poke_nn')
+    
+               )
              ))
 
 )
@@ -195,7 +237,7 @@ server <- function(input, output, session) {
     # Create Butterfly Chart
     output$bar_comp <- renderPlotly({
         req(input$pokemon_name)
-        stat_names <- c('Attack', 'Defense', 'Special Attack', 'Special Defense', 'Health Points', 'Speed')
+        stat_names <- names(features)[1:6]
         df <- selected_pokemon() %>%
             select(attack, defense, sp_attack, sp_defense, hp, speed) %>%
             `colnames<-`(stat_names) %>%
@@ -280,7 +322,7 @@ server <- function(input, output, session) {
             df <- data.frame(generation = input$poke_gen, 
                              pokemon_name = input$pokemon_name,
                              submit_date = submit_date)
-            print(df)
+            # print(df)
             #Connect to database and write Table
             con <- dbConnect(
               drv=RMySQL::MySQL(),
@@ -305,7 +347,7 @@ server <- function(input, output, session) {
     ######################
     # Survey Display Tab #
     ######################
-    
+  
     #Update Survey Data
     survey_data <- reactive({
       input$submit
@@ -321,11 +363,6 @@ server <- function(input, output, session) {
       dbDisconnect(con)
       poke_survey
     })
-    
-    output$survey_overall <- DT::renderDataTable({
-      survey_data()
-    }, rownames = FALSE,
-    options = dt_config)
     
     output$survey_by_pokemon <- renderPlotly({
       
@@ -371,10 +408,18 @@ server <- function(input, output, session) {
       
     })
     
+    output$survey_overall <- DT::renderDataTable({
+      survey_data()
+    }, rownames = FALSE,
+    options = dt_config)
+    
+    ##################
+    ## Analysis Tab ##
+    ##################
+    
     pca_df <- reactiveValues()
     observeEvent(input$run_pca, {
       poke_data$name[c(29,32,122,439, 669)] <- c('mr-mime', 'nidoran-f', 'nidoran-m', 'mime-jr', 'flabebe')
-      poke_data <- poke_data %>% filter(generation!=7)
       poke_sample <- poke_data %>% 
         filter(generation %in% input$pca_generation) %>% 
         filter(type1 %in% input$pca_type | type2 %in% input$pca_type)
@@ -389,6 +434,50 @@ server <- function(input, output, session) {
     output$poke_pca <- renderPlotly({
       run_pca_plot(pca_dataset())
     })
+    
+    # Choose a pokemon
+    output$pokemon_nn_ui <- renderUI({
+      filter_data <- poke_data %>%
+        filter(generation %in% input$pca_generation) %>% 
+        filter(type1 %in% input$pca_type | type2 %in% input$pca_type)
+      choices <- filter_data$name
+      selectInput("pokemon_nn_name",
+                  "Choose a Pokemon:",
+                  choices = choices, width = 300)
+    })
+    
+    nn_df <- reactiveValues()
+    observeEvent(input$run_nn, {
+      poke_sample <- poke_data %>% 
+        filter(generation %in% input$pca_generation) %>% 
+        filter(type1 %in% input$pca_type | type2 %in% input$pca_type) 
+      feature_set <- input$nn_features
+      poke_sample$capture_rate <- as.numeric(poke_sample$capture_rate)
+      poke_scale <- as.data.frame(apply(poke_sample[,all_of(feature_set)], MARGIN = 2, FUN = function(X) (X - min(X))/diff(range(X))))
+      poke_scale$name <- poke_sample$name
+      print(head(poke_scale))
+      
+      pokemon <- poke_scale[which(poke_scale$name==input$pokemon_nn_name),]
+      closest_idx <- nn2(poke_scale[,all_of(feature_set)], pokemon[,all_of(feature_set)], k=11)$nn.idx[1,]
+      
+      nn_table <- poke_sample[closest_idx,c('name', all_of(feature_set))]
+      colnames(nn_table) <- c("Pokemon Name", feature_df[input$nn_features, 'feature_name'])
+      nn_table$`Pokemon Index` <- row.names(nn_table)
+      nn_df[['poke_sample']] <- nn_table[, c(ncol(nn_table),1:(ncol(nn_table)-1))]
+    })
+    
+    nn_dataset <- reactive({
+      req(input$run_nn)
+      nn_df[['poke_sample']]
+    })
+    
+    output$poke_nn <- DT::renderDataTable({
+      nn_table <- nn_dataset()
+    }, rownames = FALSE,
+    options = list(pagelength=11, 
+                             dom = 't',
+                             colunDefs = list(list(className='dt-center', targets= '_all'))))
+    
 }
     
 
