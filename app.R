@@ -290,7 +290,8 @@ server <- function(input, output, session) {
             scale_fill_manual(values=c('#2a75bb','#ffcb05'))
         
         ggplotly(plot, tooltip = c("text")) %>%
-            layout(legend = l)
+            layout(legend = l) %>%
+          config(modeBarButtons = list(list("toImage")), displaylogo = FALSE)
     })
     
     # Modal Dialog
@@ -387,7 +388,8 @@ server <- function(input, output, session) {
               panel.background = element_rect(colour = 'white'),
               plot.background = element_rect(fill =  "transparent",colour = NA))
       
-      ggplotly(g, tooltip = c("text"))
+      ggplotly(g, tooltip = c("text")) %>%
+        config(modeBarButtons = list(list("toImage")), displaylogo = FALSE)
       
     })
     
@@ -405,7 +407,8 @@ server <- function(input, output, session) {
         theme(legend.position = "none",
               panel.background = element_rect(colour = 'white'),
               plot.background = element_rect(fill =  "transparent",colour = NA))
-      ggplotly(g, tooltip = c("text"))
+      ggplotly(g, tooltip = c("text")) %>%
+        config(modeBarButtons = list(list("toImage")), displaylogo = FALSE)
       
     })
     
@@ -435,7 +438,9 @@ server <- function(input, output, session) {
     })
     
     output$poke_pca <- renderPlotly({
-      run_pca_plot(pca_dataset())
+      req(input$pokemon_nn_name)
+      # print(input$pokemon_nn_name)  
+      run_pca_plot(pca_dataset(), str_to_lower(input$pokemon_nn_name))
     })
     
     # Choose a pokemon
@@ -446,11 +451,13 @@ server <- function(input, output, session) {
       choices <- filter_data$name
       selectInput("pokemon_nn_name",
                   "Choose a Pokemon:",
-                  choices = choices, width = 300)
+                  selected = 'None',
+                  choices = c('None', choices), width = 300)
     })
     
     nn_df <- reactiveValues()
     observeEvent(input$run_nn, {
+      if (input$pokemon_nn_name == 'None') return()
       poke_sample <- poke_data %>% 
         filter(generation %in% input$pca_generation) %>% 
         filter(type1 %in% input$pca_type | type2 %in% input$pca_type) 
@@ -458,7 +465,7 @@ server <- function(input, output, session) {
       poke_sample$capture_rate <- as.numeric(poke_sample$capture_rate)
       poke_scale <- as.data.frame(apply(poke_sample[,all_of(feature_set)], MARGIN = 2, FUN = function(X) (X - min(X))/diff(range(X))))
       poke_scale$name <- poke_sample$name
-      print(head(poke_scale))
+      # print(head(poke_scale))
       
       pokemon <- poke_scale[which(poke_scale$name==input$pokemon_nn_name),]
       closest_idx <- nn2(poke_scale[,all_of(feature_set)], pokemon[,all_of(feature_set)], k=11)$nn.idx[1,]
