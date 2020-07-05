@@ -380,6 +380,7 @@ server <- function(input, output, session) {
                                           '<br>Votes: ', Votes))) +
         geom_col(color='black') + 
         scale_x_discrete(limits = order) + 
+        scale_y_continuous(breaks = integer_breaks()) + 
         coord_flip() +
         xlab("") + ylab("") +
         theme(legend.position = "none",
@@ -409,7 +410,9 @@ server <- function(input, output, session) {
     })
     
     output$survey_overall <- DT::renderDataTable({
-      survey_data()
+      dt <- survey_data()
+      colnames(dt) <- c('Generation', 'Pokemon', 'Submit Date (GMT)')
+      dt
     }, rownames = FALSE,
     options = dt_config)
     
