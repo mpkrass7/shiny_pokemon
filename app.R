@@ -167,8 +167,8 @@ ui <- navbarPage(
                     div(bsButton("q2", label = "", icon = icon("question"),
                                  style = "info"), style=' margin-top:20px;'),
                     bsPopover(id = "q2", title = "Nearest Neighbors", trigger='click',
-                              content = paste0("Limiting by the first two Principal Componenets, the pokemon closest to each other in the scatter plot may not be the most similar. Instead we can use the",
-                                               a("Euclidian Distance of the selected features.",  
+                              content = paste0("Limiting by the first two Principal Components, the pokemon closest to each other in the scatter plot may not be the most similar. Instead we can use the",
+                                               a(" Euclidian Distance of the selected features.",  
                                                  href = "https://en.wikipedia.org/wiki/Euclidean_distance#:~:text=In%20mathematics%2C%20the%20Euclidean%20distance,metric%20as%20the%20Pythagorean%20metric.",
                                                  target="_blank")))
                     # div()
@@ -413,7 +413,7 @@ server <- function(input, output, session) {
     })
     
     output$survey_overall <- DT::renderDataTable({
-      dt <- survey_data()
+      dt <- survey_data() %>% arrange(desc(submit_date))
       colnames(dt) <- c('Generation', 'Pokemon', 'Submit Date (GMT)')
       dt
     }, rownames = FALSE,
