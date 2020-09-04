@@ -1,6 +1,6 @@
 // Start of the tooltip-image.js file
 // inspired, in part, by https://stackoverflow.com/a/48174836/1583084
-function(el) {
+test = function(el) {
   var tooltip = Plotly.d3.select('#' + el.id + ' .svg-container')
     .append("div")
     .attr("class", "my-custom-tooltip");

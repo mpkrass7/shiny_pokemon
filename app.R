@@ -4,6 +4,7 @@ library(shinyalert)
 library(shinythemes)
 library(shinyWidgets)
 library(shinyBS)
+library(shinycssloaders)
 
 #Data Munging
 library(tidyverse)
@@ -32,9 +33,9 @@ dt_config <- list(pageLength=10,
                   colunDefs = list(list(className='dt-center', targets= '_all')))
 
 con <- dbConnect(
-  drv      = RMySQL::MySQL(),
-  dbname   = "mpkrass_pokeShiny",
-  host     = "johnny.heliohost.org",
+  drv = RMySQL::MySQL(),
+  dbname = "mpkrass_pokeShiny",
+  host = "johnny.heliohost.org",
   user = "mpkrass_admin",
   password= "mytestpassword!",
   port=3306
@@ -153,7 +154,8 @@ ui <- navbarPage(
                  #that capture as much of the variance as possible
                 
                  
-                 plotlyOutput('poke_pca')
+                 plotlyOutput('poke_pca') %>%
+                   withSpinner(image='ditto.gif')
                ),
                fluidRow(h3("Find The Most Similar Pokemon by Euclidian Distance"),
                  splitLayout(cellWidths = c(rep(350,3), 250),
